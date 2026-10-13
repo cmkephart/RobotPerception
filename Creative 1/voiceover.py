@@ -7,6 +7,7 @@ the line for each beat is in README.md (Script) and in the scene file's `# BEAT`
     .\\.venv\\Scripts\\python.exe voiceover.py            # all three scenes (needs the -qh renders)
     .\\.venv\\Scripts\\python.exe voiceover.py 8          # one scene
     .\\.venv\\Scripts\\python.exe voiceover.py 7 --ql     # use the 480p15 preview render instead
+    .\\.venv\\Scripts\\python.exe voiceover.py --movie    # also join scenes 7-9 into one movie
 
 Each clip is trimmed of leading/trailing silence, leveled to the loudness of the scenes 2-4 narration,
 and placed LEAD seconds after its beat starts (beat lengths come from the scene file's BEAT_LEN).
@@ -165,6 +166,7 @@ def main():
     ap.add_argument("scenes", nargs="*", type=int, default=sorted(SCENES))
     ap.add_argument("--ql", action="store_true", help="use the 480p15 preview render")
     ap.add_argument("--clips", default=CLIP_DIR, help="folder holding the scene{N}_beat{B} clips")
+    ap.add_argument("--movie", action="store_true", help="also join scenes 7-9 into media/videos/Scenes7-9_<quality>.mp4")
     args = ap.parse_args()
     quality = "480p15" if args.ql else "1080p60"
     target = reference_rms()
@@ -187,6 +189,52 @@ def main():
         print(f"  -> {out}")
         all_ok &= ok
     print("all clips fit" if all_ok else "some beats need attention (see above)")
+    if args.movie:
+        parts = [os.path.join(HERE, "media", "videos", SCENES[sc][0], quality, f"{SCENES[sc][1]}_vo.mp4")
+                 for sc in sorted(SCENES)]
+        out = os.path.join(HERE, "media", "videos", f"Scenes7-9_{quality}.mp4")
+        join_movie(parts, out)
+        print(f"movie -> {out}")
+
+
+def join_movie(parts, out_path):
+    """Join scene videos end to end without re-encoding (they share codec and settings).
+
+    Each scene starts exactly where the previous scene's video ends; its audio is shifted by the same amount."""
+    srcs = [av.open(p) for p in parts]
+    v0, a0 = srcs[0].streams.video[0], srcs[0].streams.audio[0]
+    for s in srcs[1:]:
+        v, a = s.streams.video[0], s.streams.audio[0]
+        same = (v.codec_context.name, v.width, v.height, v.average_rate, bytes(v.codec_context.extradata or b""),
+                a.codec_context.name, a.rate) == \
+               (v0.codec_context.name, v0.width, v0.height, v0.average_rate, bytes(v0.codec_context.extradata or b""),
+                a0.codec_context.name, a0.rate)
+        assert same, f"{s.name}: encoding differs from {srcs[0].name}; re-render with the same quality"
+    dst = av.open(out_path, "w")
+    vout = dst.add_stream_from_template(v0)
+    aout = dst.add_stream_from_template(a0)
+    offset = 0.0                                        # seconds
+    last_dts = {}
+    for s in srcs:
+        v, a = s.streams.video[0], s.streams.audio[0]
+        for pkt in s.demux(v, a):
+            if pkt.dts is None:
+                continue
+            kind = pkt.stream.type
+            shift = int(round(offset / pkt.time_base))
+            pkt.pts = None if pkt.pts is None else pkt.pts + shift
+            pkt.dts += shift
+            # AAC encoder priming/padding makes neighbouring scenes overlap by ~20 ms; those packets are
+            # silent (every beat opens with LEAD seconds of silence), so the overlap is dropped
+            if kind in last_dts and pkt.dts <= last_dts[kind]:
+                continue
+            last_dts[kind] = pkt.dts
+            pkt.stream = vout if kind == "video" else aout
+            dst.mux(pkt)
+        offset += v.frames / float(v.average_rate)      # whole frames: the next scene starts on a frame boundary
+    dst.close()
+    for s in srcs:
+        s.close()
 
 
 if __name__ == "__main__":

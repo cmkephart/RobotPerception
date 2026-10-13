@@ -60,9 +60,23 @@ KP_WIDTH = 3                                # matched wall keypoints
 RT = dict(
     imgs=1.2, rings=1.0, squares=1.0, cut=1.6, grid=0.8, arrows=1.4, roses=1.6, size=0.6, sim=0.9,
     walls=1.0, kps=0.9, matches=1.4, count=0.6, far=1.0, swap=1.0, zero=0.7, end=1.0,
-    hold_sq=0.2, hold_grid=0.6, hold_arrows=0.3, hold_roses=2.2, hold_size=0.5,
-    hold_count=0.6, hold_far=1.4, pre_zero=0.8,
 )
+# Cue start times (seconds into each beat), measured from the recorded narration
+# (voiceover/scene 9 beat N.wav, placed by voiceover.py 0.25 s into its beat).
+CUE1 = dict(rings=1.2,       # "Knowing each keypoint's size,"
+            squares=2.7,     # "SIFT cuts out a patch"
+            cut=3.9,         # "...proportional to it,"
+            grid=6.4,        # "splits it into a four-by-four grid,"
+            arrows=8.3,      # "and records which way the brightness changes"
+            roses=10.2,      # "...in each cell."
+            sim=13.8,        # "Seen from near or far, the same patch gives the same"
+            size=15.5)       # "...128 numbers."
+CUE2 = dict(kps=1.5,         # "That fingerprint is what lets a robot"
+            matches=2.6,     # "recognize a place"
+            count=4.2,       # "...it has seen before,"
+            far=6.0,         # "even from twice as far away."
+            swap=8.3,        # "But point it at a blank wall,"
+            zero=9.9)        # "with no blobs to find, and it's blind."
 
 USE_LATEX = os.environ.get("NO_LATEX") != "1"
 
@@ -223,12 +237,15 @@ class Coda(Scene):
             if dt > 1e-3:
                 self.wait(dt)
 
+        def at(t_cue):
+            """Wait until t_cue seconds into the current beat (raises if the previous step ran past it)."""
+            pad(t0 + t_cue)
+
         # ================= BEAT 1 (0-18 s) =================
         # "Knowing each keypoint's size, SIFT cuts out a patch proportional to it, splits it into a
         # four-by-four grid, and records which way the brightness changes in each cell. Seen from
         # near or far, the same patch gives the same 128 numbers."
-        # cues (beat time): rings 1.2, squares 2.2, cut 3.4-5.0, grid 5.0-5.8, arrows 6.4-7.8,
-        # roses 8.1-9.7, "4 x 4 x 8 = 128" 11.9, similarity 13.0
+        # cues: CUE1 (timed to the recording)
         t0 = self.time
         views = []
         for img, kp, col, x, tag in ((IMG_NEAR, KP_NEAR, NEAR_COLOR, -BALLOON_X, "Z"),
@@ -243,9 +260,10 @@ class Coda(Scene):
             lab.next_to(im, DOWN, buff=0.3)
             views.append(dict(im=im, ring=ring, square=square, lab=lab, kp=kp, col=col))
         self.play(*[FadeIn(v["im"]) for v in views], *[FadeIn(v["lab"]) for v in views], run_time=RT["imgs"])
+        at(CUE1["rings"])
         self.play(*[Create(v["ring"]) for v in views], run_time=RT["rings"])
+        at(CUE1["squares"])
         self.play(*[GrowFromCenter(v["square"]) for v in views], run_time=RT["squares"])
-        self.wait(RT["hold_sq"])
 
         # cut out: each square becomes a patch of the same on-screen size (resampled to 16 x 16)
         for v, sx in zip(views, (-PATCH_X, PATCH_X)):
@@ -255,6 +273,7 @@ class Coda(Scene):
             pm.stretch_to_fit_width(PATCH_SIZE).stretch_to_fit_height(PATCH_SIZE).move_to(v["pc"])
             v["patch"] = pm
             v["frame"] = Square(side_length=PATCH_SIZE, color=v["col"], stroke_width=3).move_to(v["pc"])
+        at(CUE1["cut"])
         self.play(*[FadeOut(v["im"]) for v in views], *[FadeOut(v["ring"]) for v in views],
                   *[ReplacementTransform(v["square"], v["frame"]) for v in views],
                   *[FadeIn(v["patch"]) for v in views],
@@ -268,43 +287,43 @@ class Coda(Scene):
                                         np.array(v["pc"]) + np.array([PATCH_SIZE / 2, d, 0]))
                                    for d in np.linspace(-PATCH_SIZE / 4, PATCH_SIZE / 4, 3)]
                                 ).set_stroke(GRAY, width=1.5, opacity=0.7)
-        self.play(*[Create(v["grid"]) for v in views], run_time=RT["grid"])     # "four-by-four grid"
-        self.wait(RT["hold_grid"])
+        at(CUE1["grid"])
+        self.play(*[Create(v["grid"]) for v in views], run_time=RT["grid"])
 
         for v in views:
             v["arrows"] = gradient_arrows(v["kp"]["patch"], v["pc"], PATCH_SIZE, WHITE)
+        at(CUE1["arrows"])
         self.play(*[v["patch"].animate.set_opacity(0.45) for v in views],
                   *[LaggedStart(*[GrowArrow(a) for a in v["arrows"]], lag_ratio=0.02) for v in views],
                   run_time=RT["arrows"])
-        self.wait(RT["hold_arrows"])
 
         for v in views:
             v["roses"] = roses(v["kp"]["hists"], v["pc"], PATCH_SIZE, v["col"])
+        at(CUE1["roses"])
         self.play(*[FadeTransform(v["arrows"], v["roses"]) for v in views],
                   *[v["patch"].animate.set_opacity(0.15) for v in views], run_time=RT["roses"])
-        self.wait(RT["hold_roses"])
 
         # descriptor length, read off the histograms: cells x cells x directions
         for v in views:
             cells, _, bins = v["kp"]["hists"].shape
             v["size"] = Text(f"{cells} × {cells} × {bins} = {v['kp']['desc'].size} numbers", font_size=22,
                              color=GRAY_B).next_to(v["frame"], DOWN, buff=0.25)
-        self.play(*[FadeIn(v["size"]) for v in views], run_time=RT["size"])     # "the same 128 numbers"
-        self.wait(RT["hold_size"])
 
         sim = VGroup(Text("similarity", font_size=24), Text(f"{SIMILARITY:.3f}", font_size=30))
         sim.arrange(DOWN, buff=0.15).move_to([0, PATCH_Y, 0])
         link = DoubleArrow(views[0]["frame"].get_right() + RIGHT * 0.15, views[1]["frame"].get_left() + LEFT * 0.15,
                            buff=0, color=WHITE, stroke_width=2, tip_length=0.15).next_to(sim, DOWN, buff=0.2)
         link.set_y(PATCH_Y - 0.75)
+        at(CUE1["sim"])
         self.play(FadeIn(sim), GrowFromCenter(link), run_time=RT["sim"])
+        at(CUE1["size"])
+        self.play(*[FadeIn(v["size"]) for v in views], run_time=RT["size"])
         pad(t0 + BEAT_LEN["b1"])
 
         # ================= BEAT 2 (18-32 s) =================
         # "That fingerprint is what lets a robot recognize a place it has seen before, even from twice
         # as far away. But point it at a blank wall, with no blobs to find, and it's blind."
-        # cues (beat time): walls 0.5-1.5, keypoints 2.4, matches 2.4-3.8, count 4.4,
-        # "twice as far" tag 5.0, blank wall 7.4-8.4, "0 keypoints" 9.2
+        # cues: CUE2 (timed to the recording)
         t0 = self.time
         beat1 = Group(*[m for v in views for m in (v["patch"], v["frame"], v["lab"], v["roses"], v["grid"], v["size"])],
                       sim, link)
@@ -327,25 +346,28 @@ class Coda(Scene):
 
         ra = kp_rings(KPS_A, ca, NEAR_COLOR, {i for i, _ in MATCHES})
         rb = kp_rings(KPS_B, cb, FAR_COLOR, {j for _, j in MATCHES})
+        at(CUE2["kps"])
         self.play(FadeIn(ra), FadeIn(rb), run_time=RT["kps"])
         links = VGroup(*[Line(screen_point(KPS_A[i]["row"], KPS_A[i]["col"], WALL_SHAPE, WALL_SCALE, ca),
                               screen_point(KPS_B[j]["row"], KPS_B[j]["col"], WALL_SHAPE, WALL_SCALE, cb),
                               color=MATCH_COLOR, stroke_width=MATCH_WIDTH, stroke_opacity=MATCH_OPACITY)
                          for i, j in MATCHES])
+        at(CUE2["matches"])
         self.play(LaggedStart(*[Create(l) for l in links], lag_ratio=0.15), run_time=RT["matches"])
         n_ok = sum(match_is_correct(i, j) for i, j in MATCHES)
         count = Text(f"{len(MATCHES)} matches, {n_ok} correct", font_size=26).move_to([0, -2.3, 0])
+        at(CUE2["count"])
         self.play(FadeIn(count), run_time=RT["count"])
-        self.wait(RT["hold_count"])
-        self.play(Indicate(tag_b, color=FAR_COLOR), run_time=RT["far"])          # "even from twice as far away"
-        self.wait(RT["hold_far"])
+        at(CUE2["far"])
+        self.play(Indicate(tag_b, color=FAR_COLOR), run_time=RT["far"])
 
         w0 = show_image(WALL_0, WALL_SHAPE, WALL_SCALE, [0, WALL_Y, 0])
         tag_0 = Text("blank wall", font_size=22, color=GRAY_B).next_to(w0, UP, buff=0.2)
+        at(CUE2["swap"])
         self.play(FadeOut(Group(wa, wb, tag_a, tag_b, ra, rb, links, count)), FadeIn(w0), FadeIn(tag_0),
                   run_time=RT["swap"])
         zero = Text(f"{len(KPS_0)} keypoints", font_size=26).move_to([0, -2.3, 0])
-        self.wait(RT["pre_zero"])
+        at(CUE2["zero"])
         self.play(FadeIn(zero), run_time=RT["zero"])
         pad(t0 + BEAT_LEN["b2"] - RT["end"])
         self.play(FadeOut(Group(w0, tag_0, zero)), run_time=RT["end"])

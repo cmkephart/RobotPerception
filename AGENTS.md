@@ -46,7 +46,8 @@ Do not rely on the shell-activated `manim` alias on Windows because PowerShell e
 
 ## Next recommended task
 
-- Voiceover (in progress, on branch `scenes-7-9`): the owner records 8 clips in Audacity, one per beat, following `Creative 1/voiceover/README.md`, and saves them as `Creative 1/voiceover/scene{N}_beat{B}.wav`. Then run `.\.venv\Scripts\python.exe voiceover.py` from `Creative 1/`. It reports each clip's length against its slot and writes `media/videos/<scene>/1080p60/<Scene>_vo.mp4`. The `_vo.mp4` files there now hold a robot-voice placeholder for checking timing. Check the first real clip's level and quality before the rest are recorded.
+- Voiceover is done. The 8 recorded clips are in `Creative 1/voiceover/` (`scene N beat B.wav`). The animation cues in scenes 7-9 (`CUE*` dicts) are timed to the phrase starts in those recordings, so re-recording a beat means re-measuring its cues. Rebuild with `.\.venv\Scripts\python.exe voiceover.py --movie` from `Creative 1/` after a `-qh` render. It writes each `<Scene>_vo.mp4` plus the joined `media/videos/Scenes7-9_1080p60.mp4` (lossless join, no re-encode).
+- Possible next step: join these with the teammates' scenes 1-6 into the full video.
 
 ## References to consult
 

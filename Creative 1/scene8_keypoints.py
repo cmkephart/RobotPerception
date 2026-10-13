@@ -51,7 +51,7 @@ BEAT_LEN = dict(b1=18, b2=13)               # seconds, total 31
 RT = dict(
     layers_in=1.0, spread=2.6, axes=1.0, marker=0.8, indicate=1.0, to_block=1.6,
     same=1.0, above=1.0, below=1.0, compare=0.9,
-    flat=1.4, dots=0.6, circles=1.0, clutter=1.2, weak=1.1, edge=1.1, final=0.6,
+    flat=1.4, dots=0.6, circles=1.0, clutter=1.2, tag_in=0.5, tag_hold=1.4, tag_out=0.5, final=0.6,   # "weak" / "edge": fade in, hold to read, fade out
 )
 # Cue start times (seconds into the beat), measured from the recorded narration
 # (voiceover/scene 8 beat {1,2}.wav, placed by voiceover.py 0.25 s into each beat).
@@ -66,7 +66,7 @@ CUE2 = dict(dots=1.4,        # "Position says where the feature is;"
             clutter=4.9,     # "Then SIFT cleans up:"
             weak=6.9,        # "it drops weak responses, which are mostly noise,"
             edge=9.4,        # "and points on edges, which can slide along the edge."
-            final=11.4)
+            final=11.9)
 
 USE_LATEX = os.environ.get("NO_LATEX") != "1"
 
@@ -327,12 +327,14 @@ class Keypoints(ThreeDScene):
 
         weak_tag = tag_for(cand["weak"], "weak")
         at(CUE2["weak"])
-        self.play(cand["weak"].animate.set_stroke(GRAY, opacity=GHOST_OPACITY), FadeIn(weak_tag), run_time=RT["weak"] / 2)
-        self.play(FadeOut(cand["weak"]), FadeOut(weak_tag), run_time=RT["weak"] / 2)
+        self.play(cand["weak"].animate.set_stroke(GRAY, opacity=GHOST_OPACITY), FadeIn(weak_tag), run_time=RT["tag_in"])
+        self.wait(RT["tag_hold"])
+        self.play(FadeOut(cand["weak"]), FadeOut(weak_tag), run_time=RT["tag_out"])
         at(CUE2["edge"])
         edge_tag = tag_for(cand["edge"], "edge")
-        self.play(cand["edge"].animate.set_stroke(GRAY, opacity=GHOST_OPACITY), FadeIn(edge_tag), run_time=RT["edge"] / 2)
-        self.play(FadeOut(cand["edge"]), FadeOut(edge_tag), run_time=RT["edge"] / 2)
+        self.play(cand["edge"].animate.set_stroke(GRAY, opacity=GHOST_OPACITY), FadeIn(edge_tag), run_time=RT["tag_in"])
+        self.wait(RT["tag_hold"])
+        self.play(FadeOut(cand["edge"]), FadeOut(edge_tag), run_time=RT["tag_out"])
         at(CUE2["final"])
         self.play(*[Indicate(g, scale_factor=1.08, color=cl) for g, cl in zip(rings, DISK_COLORS)],
                   run_time=RT["final"])

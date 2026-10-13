@@ -43,11 +43,27 @@ SIGMA_TICKS = [0.1, 0.2, 0.5, 1.0]
 
 BEAT_LEN = dict(b1=10, b2=16, b3=12, b4=9)   # seconds, total 47
 RT = dict(
-    img_in=1.2, radii=1.5, tags=0.8,
-    eq=1.2, pre_dog=1.5, to_dog=1.2, pre_readout=3.5, readout=0.6, pre_sweep=1.8, sweep=5.6, flash=0.8,
+    img_in=1.2, radius=0.6, tags=0.8,
+    eq=1.2, to_dog=1.2, readout=0.6, flash=0.8,
     out=0.8, axes=1.0, curves=2.0, dots=1.2, peaks=1.2, level=0.8,
-    pre_arrows=1.5, arrows=1.4, back=1.2, circles=1.2, key=0.8,
+    arrows=1.4, back=1.0, circles=0.8, key=0.5,
 )
+# Cue start times (seconds into each beat), measured from the recorded narration
+# (voiceover/scene 7 beat N.wav, placed by voiceover.py 0.25 s into its beat).
+CUE1 = dict(tags=3.9,        # "...photographed from three distances:"
+            radius=(6.6, 7.8, 9.05))   # "...of radius r," / "then 2r," / "then 4r."
+CUE2 = dict(dog=2.7,         # "...and we get one Difference-of-Gaussians layer:"
+            readout=8.3,     # "Step sigma up,"
+            sweep=9.6,       # "...and watch:"
+            peaks=(10.9, 12.7, 13.7),  # "the small disk lights up first," / "then the middle one," / "then the big one."
+            end=14.6)
+CUE3 = dict(dots=4.4,        # "Each peaks in its own layer,"
+            peaks=6.5,       # "at sigma equals r over root two,"
+            level=9.4)       # "and all three peaks reach the same height."
+CUE4 = dict(arrows=5.0,      # "...its blob peaks three layers apart."
+            back=6.6,        # "Different sigma,"
+            circles=7.6,     # "same feature."
+            key=8.4)
 
 USE_LATEX = os.environ.get("NO_LATEX") != "1"
 
@@ -161,6 +177,10 @@ class TwoDCircles(Scene):
             if dt > 1e-3:
                 self.wait(dt)
 
+        def at(t_cue):
+            """Wait until t_cue seconds into the current beat (raises if the previous step ran past it)."""
+            pad(t0 + t_cue)
+
         radii = [d[2] for d in DISKS]
 
         # ================= BEAT 1 (0-10 s) =================
@@ -183,17 +203,17 @@ class TwoDCircles(Scene):
             zl = tex(zt, fb=[zt]).scale(0.8).set_color(col)
             zl.move_to(on_screen(cx, -SHAPE[0] / PX / 2 - 0.35))
             z_tags.add(zl)
-        self.play(LaggedStart(*[AnimationGroup(Create(m), FadeIn(t)) for m, t in zip(radius_marks, radius_tags)],
-                              lag_ratio=0.35), run_time=RT["radii"])
+        at(CUE1["tags"])
         self.play(FadeIn(z_tags), run_time=RT["tags"])
+        for m, t, cue in zip(radius_marks, radius_tags, CUE1["radius"]):
+            at(cue)
+            self.play(Create(m), FadeIn(t), run_time=RT["radius"])
         pad(t0 + BEAT_LEN["b1"])
 
         # ================= BEAT 2 (10-26 s) =================
         # "Blur, subtract the next blur level, and we get one Difference-of-Gaussians layer: how much
         # each point cooled in between. Step sigma up, and watch: the small disk lights up first,
         # then the middle one, then the big one."
-        # cues (beat time): equation 0-1.2, DoG layer 2.7-3.9, readout 7.4, sweep 9.8-15.4 with
-        # flashes at about 10.5, 12.6, 14.7 ("small ... middle ... big")
         t0 = self.time
         eq = tex(r"D_\sigma", "=", r"G_{k\sigma} * I", "-", r"G_{\sigma} * I",
                  fb=["D_σ", "=", "G_kσ * I", "−", "G_σ * I"]).move_to([-1.3, 3.25, 0])
@@ -201,9 +221,8 @@ class TwoDCircles(Scene):
 
         ell = ValueTracker(0.0)
         first = layer_image(0.0)
-        self.wait(RT["pre_dog"])
+        at(CUE2["dog"])
         self.play(FadeTransform(photo, first), run_time=RT["to_dog"])
-        self.wait(RT["pre_readout"])                   # "how much each point cooled in between"
         self.remove(first)
         live = always_redraw(lambda: layer_image(ell.get_value()))
         self.add(live)
@@ -217,21 +236,25 @@ class TwoDCircles(Scene):
         lay_num.update()
         sig_num.update()
         readout = VGroup(lay_lab, sig_lab, lay_num, sig_num)
+        at(CUE2["readout"])
         self.play(FadeIn(readout), run_time=RT["readout"])
-        self.wait(RT["pre_sweep"])                     # "Step sigma up, and watch:"
 
-        # one continuous linear sweep over the layers, split where each disk peaks so it can flash
+        # a linear sweep over the layers, split so each disk reaches its peak layer as it is named
         end = N_LAYERS - 1
-        self.play(ell.animate.set_value(PEAK_LAYER[0]), run_time=RT["sweep"] * PEAK_LAYER[0] / end,
-                  rate_func=linear)
+        at(CUE2["sweep"])
+        self.play(ell.animate.set_value(PEAK_LAYER[0]), run_time=CUE2["peaks"][0] - CUE2["sweep"], rate_func=linear)
+        stops = list(CUE2["peaks"][1:]) + [CUE2["end"]]
         for k_, (lay, (cx, cy, r, _), col) in enumerate(zip(PEAK_LAYER, DISKS, DISK_COLORS)):
             nxt = PEAK_LAYER[k_ + 1] if k_ + 1 < len(PEAK_LAYER) else end
             ring = Circle(radius=r, color=col, stroke_width=4).move_to(on_screen(cx, cy))
-            # no play-level run_time: the flashes keep their own short durations inside the sweep segment
-            self.play(ell.animate(rate_func=linear, run_time=RT["sweep"] * (nxt - lay) / end).set_value(nxt),
+            at(CUE2["peaks"][k_])
+            # no play-level run_time: the flashes keep their own short durations inside the sweep segment,
+            # capped so they finish before the next disk is named
+            seg = stops[k_] - CUE2["peaks"][k_]
+            self.play(ell.animate(rate_func=linear, run_time=seg).set_value(nxt),
                       Flash(on_screen(cx, cy), color=col, flash_radius=r + 0.15, line_length=0.25,
-                            run_time=RT["flash"]),
-                      ShowPassingFlash(ring, time_width=0.9, run_time=RT["flash"] * 1.5))
+                            run_time=min(RT["flash"], seg)),
+                      ShowPassingFlash(ring, time_width=0.9, run_time=min(RT["flash"] * 1.5, seg)))
         pad(t0 + BEAT_LEN["b2"])
 
         # ================= BEAT 3 (26-38 s) =================
@@ -267,6 +290,7 @@ class TwoDCircles(Scene):
             dots.add(VGroup(*[Dot(ax.c2p(lx(s), v), radius=0.05, color=col)
                               for s, v in zip(MID_SIGMA, m) if LOGS_RANGE[0] <= math.log10(s) <= LOGS_RANGE[1]]))
         dots_tag = Text("DoG layers", font_size=22, color=GRAY_B).move_to(ax.c2p(lx(1.0), NORM_PEAK * 1.22))
+        at(CUE3["dots"])
         self.play(LaggedStart(*[FadeIn(d, lag_ratio=0.1) for d in dots], lag_ratio=0.2), FadeIn(dots_tag),
                   run_time=RT["dots"])
 
@@ -279,9 +303,11 @@ class TwoDCircles(Scene):
             peak_dots.add(Dot(top, radius=0.07, color=col))
             peak_vals.add(Text(f"{s_star:.2f}", font_size=22, color=col).next_to(top, UP, buff=0.12))
         rule = tex(r"\sigma^* = \frac{r}{\sqrt{2}}", fb=["σ* = r / √2"]).move_to([-1.3, 3.25, 0])
+        at(CUE3["peaks"])
         self.play(Create(peak_marks), FadeIn(peak_dots), FadeIn(peak_vals), Write(rule), run_time=RT["peaks"])
         level = DashedLine(ax.c2p(0, NORM_PEAK), ax.c2p(LOGS_RANGE[1] - LOGS_RANGE[0], NORM_PEAK), dash_length=0.1,
                            stroke_width=2, color=WHITE, stroke_opacity=0.55)
+        at(CUE3["level"])
         self.play(Create(level), run_time=RT["level"])
         pad(t0 + BEAT_LEN["b3"])
 
@@ -289,7 +315,6 @@ class TwoDCircles(Scene):
         # "Photograph the same object from three distances, and its blob peaks three layers apart.
         # Different sigma, same feature."
         t0 = self.time
-        self.wait(RT["pre_arrows"])                    # arrows land on "three layers apart"
         hops = VGroup()
         for a, b in ((0, 1), (1, 2)):
             pa, pb = peak_dots[a].get_center(), peak_dots[b].get_center()
@@ -298,13 +323,14 @@ class TwoDCircles(Scene):
             n = PEAK_LAYER[b] - PEAK_LAYER[a]
             lab = Text(f"+{n} layers", font_size=22).next_to(arc, UP, buff=0.08)
             hops.add(VGroup(arc, lab))
+        at(CUE4["arrows"])
         self.play(FadeOut(peak_vals), FadeOut(dots_tag),
                   LaggedStart(*[Create(h[0]) for h in hops], lag_ratio=0.4),
                   LaggedStart(*[FadeIn(h[1]) for h in hops], lag_ratio=0.4), run_time=RT["arrows"])
-        self.wait(1.4)
 
         plot = VGroup(ax, x_lab, y_lab, ticks, curves, dots, peak_marks, peak_dots, level, hops, rule)
         photo2 = place_image(gray_rgb(IMAGE))
+        at(CUE4["back"])
         self.play(FadeOut(plot), FadeIn(photo2), FadeIn(z_tags), run_time=RT["back"])
 
         found = VGroup()
@@ -312,9 +338,11 @@ class TwoDCircles(Scene):
             x, y = to_scene(r_, c_, SHAPE, PX)
             rad = math.sqrt(2) * MID_SIGMA[lay]          # detected scale -> radius: r = sqrt(2) sigma*
             found.add(Circle(radius=rad, color=col, stroke_width=4).move_to(on_screen(x, y)))
+        at(CUE4["circles"])
         self.play(photo2.animate.set_opacity(GHOST_OPACITY),
                   LaggedStart(*[Create(c) for c in found], lag_ratio=0.3), run_time=RT["circles"])
         key = tex(r"(x,\, y,\, \sigma)", fb=["(x, y, σ)"]).move_to([-1.3, 3.25, 0])
+        at(CUE4["key"])
         self.play(Write(key), run_time=RT["key"])
         pad(t0 + BEAT_LEN["b4"])
 
