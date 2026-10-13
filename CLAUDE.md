@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Manim Community **v0.21.0** animations for a robot-perception course video on why SIFT needs scale space. Everything lives in `Creative 1/`. Scenes 2-4 exist; the full plan is in `Creative 1/README.md`.
+Manim Community **v0.21.0** animations for a robot-perception course video on why SIFT needs scale space. Everything lives in `Creative 1/`. Scenes 2-4 and 7-9 exist as code; scenes 1, 5 and 6 only as videos in `Creative 1/Videos_others/`. The full plan and locked narration are in `Creative 1/README.md`.
 
 ## Setup and run
 - `cd "Creative 1"`, then `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`. macOS also needs `brew install pkg-config cairo pango ffmpeg`, and LaTeX for `MathTex`.

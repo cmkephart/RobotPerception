@@ -9,11 +9,15 @@ A ~7 minute, 3Blue1Brown-style [Manim](https://docs.manim.community/en/stable/) 
 | `scene2_pinhole_1d.py` | Scene 2, `Pinhole1D`: 1D pinhole camera, image size s = f·L/Z, size/distance ambiguity, then a brightness plot I(x) |
 | `scene3_kernel_gaussian.py` | Scene 3, `KernelGaussian1D`: convolution as a sliding weighted sum, the Gaussian kernel, one fixed σ vs. three object sizes |
 | `scene4_blur_is_heat.py` | Scene 4, `BlurIsHeat`: blur as heat diffusion, heat equation, σ = √(2t), small spots cool first |
-| `common.py` | Shared constants and exact signal functions (boxes, blurred boxes, FTCS heat solver, half-life); pure numpy |
+| `scene7_2d_circles.py` | Scene 7, `TwoDCircles`: one disk at 4Z, 2Z, Z (radii r, 2r, 4r); DoG sweep; measured DoG on the exact σ² curve; peaks at r/√2, three layers apart |
+| `scene8_keypoints.py` | Scene 8, `Keypoints` (the one `ThreeDScene`): DoG layers stacked into (x, y, σ); the real 3×3×3 block, 8 + 9 + 9 = 26; Lowe's contrast and edge tests on a cluttered image |
+| `scene9_coda.py` | Scene 9, `Coda`: σ-sized patch → gradients → 4×4×8 descriptor, same from Z and 2Z; wall matched across distances; blank wall has 0 keypoints |
+| `common.py` | Shared constants and exact signal functions (boxes, blurred boxes, FTCS heat solver, half-life), plus the 2D pipeline for scenes 7–9 (disk images, FFT blur, DoG stack, 26-neighbor extrema, Lowe's tests, descriptors, ratio-test matching); pure numpy |
+| `Videos_others/` | Rendered reference cuts: scene 1 (`Hook.mp4`), scenes 2–4 (`02-03-04.Creative1.HDRender.mp4`), scene 5 (`MeasuringSize.mp4`), scene 6 (`DoGForFree.mp4`) |
 | `formatting.md` | Style guide (also reproduced below) |
 | `requirements.txt` | Pinned Python packages (Manim Community v0.21.0) |
 
-Scenes 1 and 5 to 9 are not written yet. Each scene file has a `self_check()` that asserts its geometry and numerics before rendering.
+Scenes 1, 5 and 6 exist only as rendered videos in `Videos_others/`. Each scene file has a `self_check()` that asserts its geometry and numerics before rendering. Scenes 7–9 pad every beat to a fixed length (`BEAT_LEN`) and raise if a beat overruns, so the narration below drops in at fixed timecodes.
 
 **Render** (with the environment from the setup section below active):
 
@@ -21,12 +25,17 @@ Scenes 1 and 5 to 9 are not written yet. Each scene file has a `self_check()` th
 manim -pql scene2_pinhole_1d.py Pinhole1D            # preview 480p15
 manim -pql scene3_kernel_gaussian.py KernelGaussian1D
 manim -pql scene4_blur_is_heat.py BlurIsHeat
+manim -pql scene7_2d_circles.py TwoDCircles
+manim -pql scene8_keypoints.py Keypoints
+manim -pql scene9_coda.py Coda
 manim -qh  scene4_blur_is_heat.py BlurIsHeat         # final 1080p60
 ```
 
+On Windows, call the venv's Python directly instead of activating it: `.\.venv\Scripts\python.exe -m manim -pql scene7_2d_circles.py TwoDCircles`.
+
 `NO_LATEX=1 manim ...` gives a plain-text preview on machines without LaTeX (final renders need real LaTeX).
 
-**Status vs. the proposal:** Scene 2 now puts the image plane *between* the camera and the object (upright image, class convention) instead of a line behind the pinhole as the proposal's script says; its narration should say "a line in front of it". Scene 3 uses "same" convolution (zero padding), and Scene 4 asserts box separation at t = 0.2 rather than t = 0.7, where the boxes have merged.
+**Status vs. the proposal:** Scene 2 now puts the image plane *between* the camera and the object (upright image, class convention) instead of a line behind the pinhole as the proposal's script says; its narration should say "a line in front of it". Scene 3 uses "same" convolution (zero padding), and Scene 4 asserts box separation at t = 0.2 rather than t = 0.7, where the boxes have merged. Scenes 7–9 follow the storyboard, with the narration expanded to the pace of scenes 2–6 (about 135–150 wpm) and lengthened to 0:47, 0:31 and 0:32 (locked text below; the scene files quote it in their `# BEAT` comments). Scene 7 uses three disks of radii r, 2r, 4r so that "same object at three distances" and "three layers apart" (k³ = 2) are the same picture; its DoG dots are divided by ln k rather than k − 1, the midpoint estimate of D8. Scene 9 draws the Hook's balloon as a grayscale disk with stripes, and stands in for the maze agent with a synthetic textured wall and a blank wall.
 
 ## High-level proposal
 
@@ -262,27 +271,28 @@ Narration by scene and beat, \~7:20 total at \~140 wpm. Times are relative to th
 | 3 | 0:25–0:42 | Replace that derivative with a difference between two blur levels, σ and kσ. The Difference of Gaussians equals k minus one, times σ², times the Laplacian. The σ² we needed appears on its own. | Derivation transforms; DoG curve overlays (k−1)σ²∇²G |
 | 4 | 0:42–1:00 | In heat terms: subtract two snapshots, and you get how much each point cooled in between. Since time grows like σ², equal steps in σ mean time gaps proportional to σ². That is the normalization, for free. So SIFT just blurs repeatedly and subtracts neighbors. | Two snapshots, shaded difference; Δt ∝ σ² bar |
 
-#### Scene 7: 2D circles (0:45)
+#### Scene 7: 2D circles (0:47)
 
 | Beat | Time | Narration | On screen |
 | --- | --- | --- | --- |
-| 1 | 0:00–0:15 | Back to two dimensions. Here's an image of circles with different radii, and its Difference of Gaussians at increasing σ. | Circles image; DoG layers fanning out |
-| 2 | 0:15–0:30 | Each circle lights up brightest in its own layer. For a disk of radius r, that happens at σ ≈ r/√2. | Per-circle response vs. σ, peak marked |
-| 3 | 0:30–0:45 | Photograph the same object from three distances, and its blob peaks three layers apart. Different σ, same feature. | Hook object at 3 distances, peaks in shifted layers |
+| 1 | 0:00–0:10 | Back to two dimensions. Here's one object photographed from three distances: a bright disk of radius r, then 2r, then 4r. | Disks r, 2r, 4r tagged 4Z, 2Z, Z |
+| 2 | 0:10–0:26 | Blur, subtract the next blur level, and we get one Difference-of-Gaussians layer: how much each point cooled in between. Step σ up, and watch: the small disk lights up first, then the middle one, then the big one. | D = G(kσ)∗I − G(σ)∗I; sweep through 9 DoG layers; each disk flashes in its peak layer (2, 5, 8) |
+| 3 | 0:26–0:38 | Track each disk's center across the layers. Each peaks in its own layer, at σ equals r over root two, and all three peaks reach the same height. | Exact σ² curves + measured DoG dots; peaks at 0.18, 0.35, 0.71; common height 2(p − b)/e |
+| 4 | 0:38–0:47 | Photograph the same object from three distances, and its blob peaks three layers apart. Different σ, same feature. | "+3 layers" arrows; detected circles of radius √2σ* fit each disk; (x, y, σ) |
 
-#### Scene 8: Keypoints (0:30)
-
-| Beat | Time | Narration | On screen |
-| --- | --- | --- | --- |
-| 1 | 0:00–0:18 | Stack the layers into a volume: position on two axes, scale on the third. A keypoint is a point brighter, or darker, than all 26 neighbors: 8 around it, 9 above, 9 below. | 3D voxel with its 26 neighbors highlighted |
-| 2 | 0:18–0:30 | Its position says where the feature is; its scale says how big. SIFT then discards weak responses and points sitting on edges. | Keypoints drawn as circles of radius ∝ σ |
-
-#### Scene 9: Coda (0:30)
+#### Scene 8: Keypoints (0:31)
 
 | Beat | Time | Narration | On screen |
 | --- | --- | --- | --- |
-| 1 | 0:00–0:18 | Knowing each keypoint's size, we cut out a patch proportional to it and describe it by the directions of its gradients. From near or far, the same patch gets the same description. | Patch scaled by σ; orientation histogram |
-| 2 | 0:18–0:30 | That's what lets a robot recognize a place it has seen before. And on a blank wall, with no blobs to find, it's blind. | Maze agent views; blank wall with no keypoints |
+| 1 | 0:00–0:18 | Stack the layers into one volume: two axes for position, a third for scale. A keypoint is a sample brighter, or darker, than all 26 of its neighbors: 8 around it in its own layer, 9 in the layer above, 9 below. | DoG stack in 3D; the 2Z disk's real 3×3×3 block; tally 8 + 9 + 9 = 26; center 0.656 vs. best neighbor 0.654 |
+| 2 | 0:18–0:31 | Position says where the feature is; scale says how big. Then SIFT cleans up: it drops weak responses, which are mostly noise, and points on edges, which can slide along the edge. | Keypoint circles (radius √2σ); faint disk and thin ellipse added; weak and edge candidates removed, the three disks survive |
+
+#### Scene 9: Coda (0:32)
+
+| Beat | Time | Narration | On screen |
+| --- | --- | --- | --- |
+| 1 | 0:00–0:18 | Knowing each keypoint's size, SIFT cuts out a patch proportional to it, splits it into a four-by-four grid, and records which way the brightness changes in each cell. Seen from near or far, the same patch gives the same 128 numbers. | Balloon at Z and 2Z; 3σ patches (2:1 in size) resampled to one size; 4×4 grid; gradient arrows; orientation roses; "4 × 4 × 8 = 128 numbers"; similarity 1.000 |
+| 2 | 0:18–0:32 | That fingerprint is what lets a robot recognize a place it has seen before, even from twice as far away. But point it at a blank wall, with no blobs to find, and it's blind. | Textured wall "seen before" vs. "now, twice as far": 8 matches, 8 correct; blank wall: 0 keypoints; fade out |
 
 ### Derivations
 

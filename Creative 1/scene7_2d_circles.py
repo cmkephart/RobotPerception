@@ -5,34 +5,90 @@ Render:
     manim -pql scene7_2d_circles.py TwoDCircles     # preview (480p15)
     manim -qh  scene7_2d_circles.py TwoDCircles     # final   (1080p60)
 
-This scene shows the 2D analogue of the 1D scale-space detector: each circular blob
-lights up most strongly when the Gaussian blur width matches its size. For a disk of radius r,
-the peak happens near sigma ≈ r / sqrt(2). Set NO_LATEX=1 only to preview without a LaTeX install.
+One object (a bright disk) seen from three distances: radii r, 2r, 4r. Every image and number
+on screen is computed: the disk image and its SIFT DoG stack come from common.py, the curves
+are the exact scale-normalized response at a disk center, and the dots are the DoG stack
+measured at each center. Each disk peaks at sigma = r / sqrt(2), three layers (one octave)
+after the next smaller one. Set NO_LATEX=1 only to preview without a LaTeX install.
 """
 import math
 import os
+import sys
 
 import numpy as np
 from manim import *
 
-# ----------------------------------------------------------------- constants
-CIRCLE_COLORS = [YELLOW, TEAL, PINK]
-RADIUS_SET = [0.45, 0.9, 1.5]
-CENTER_X = [-2.4, 0.0, 2.4]
-SIGMA_SET = np.array([0.30, 0.45, 0.70, 1.00, 1.40, 1.90])
-AXIS_COLOR = GRAY
-PEAK_COLOR = ORANGE
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from common import (BG, CIRCLE_DISKS, CIRCLE_LAYERS, CIRCLE_PX, CIRCLE_R0, CIRCLE_SHAPE,  # noqa: E402
+                    CIRCLE_SIGMA0, PEAK, SIFT_K, classify_extrema, disk_image, disk_norm_log, dog_stack,
+                    find_extrema, to_pixel, to_scene)
 
-BEAT_LEN = dict(b1=15, b2=15, b3=15)    # seconds, total 45
+# ----------------------------------------------------------------- constants
+DISK_COLORS = [PINK, TEAL, YELLOW]          # far (4Z), middle (2Z), near (Z): same order as Scenes 4-6
+Z_TAGS = ["4Z", "2Z", "Z"]
+R0, DISKS, PX, SHAPE = CIRCLE_R0, CIRCLE_DISKS, CIRCLE_PX, CIRCLE_SHAPE    # shared with Scene 8 (common.py)
+N_LAYERS, SIGMA0 = CIRCLE_LAYERS, CIRCLE_SIGMA0     # layer i spans [k^i, k^(i+1)] * SIGMA0
+IMG_Y = 0.35                                # image center on screen
+LN_K = math.log(SIFT_K)                     # DoG / ln k estimates sigma^2 * cooling rate (README D8)
+NORM_PEAK = 2 * (PEAK - BG) / math.e        # theoretical peak height of every curve
+NEG_GAIN = 2.5                              # surround (negative) response drawn this much brighter in BLUE_C
+POS_COLOR, NEG_COLOR = WHITE, BLUE_C
+AXIS_COLOR = GRAY
+GHOST_OPACITY = 0.3
+
+# response plot (log10 sigma on x)
+LOGS_RANGE = (-1.0, 0.25)                   # sigma from 0.1 to ~1.78
+PLOT_X_LEN, PLOT_Y_LEN, PLOT_CENTER = 9.0, 4.2, (0.3, -0.25)
+SIGMA_TICKS = [0.1, 0.2, 0.5, 1.0]
+
+BEAT_LEN = dict(b1=10, b2=16, b3=12, b4=9)   # seconds, total 47
 RT = dict(
-    intro=1.2,
-    stack=2.0,
-    curve=2.0,
-    peak=0.8,
-    hold=1.5,
+    img_in=1.2, radii=1.5, tags=0.8,
+    eq=1.2, pre_dog=1.5, to_dog=1.2, pre_readout=3.5, readout=0.6, pre_sweep=1.8, sweep=5.6, flash=0.8,
+    out=0.8, axes=1.0, curves=2.0, dots=1.2, peaks=1.2, level=0.8,
+    pre_arrows=1.5, arrows=1.4, back=1.2, circles=1.2, key=0.8,
 )
 
 USE_LATEX = os.environ.get("NO_LATEX") != "1"
+
+# ---------------------------------------------------------------- precompute
+IMAGE = disk_image(SHAPE, PX, DISKS)
+DOG, SIGMAS_PX = dog_stack(IMAGE, SIGMA0 * PX, N_LAYERS)
+MID_SIGMA = SIGMAS_PX * math.sqrt(SIFT_K) / PX          # scene units, one per layer
+RESP = -DOG / LN_K                                       # sigma^2 * cooling rate, per pixel and layer
+CENTER_PIX = [tuple(int(round(v)) for v in to_pixel(cx, cy, SHAPE, PX)) for cx, cy, _, _ in DISKS]
+MEASURED = [RESP[:, r, c] for r, c in CENTER_PIX]        # one row of N_LAYERS samples per disk
+PEAK_LAYER = [int(np.argmax(m)) for m in MEASURED]
+
+
+def self_check():
+    radii = [d[2] for d in DISKS]
+    # same object at Z, 2Z, 4Z: radii double each time
+    assert all(abs(radii[i + 1] / radii[i] - 2) < 1e-12 for i in range(2))
+    # every disk center sits on a pixel center
+    for cx, cy, _, _ in DISKS:
+        r, c = to_pixel(cx, cy, SHAPE, PX)
+        assert abs(r - round(r)) < 1e-9 and abs(c - round(c)) < 1e-9, (cx, cy)
+    # the exact curve peaks at r / sqrt(2), always at height 2 (P - BG) / e
+    for r in radii:
+        s = np.exp(np.linspace(math.log(0.05), math.log(3), 20001))
+        v = np.array([disk_norm_log(r, x) for x in s])
+        assert abs(s[v.argmax()] / (r / math.sqrt(2)) - 1) < 1e-3, r
+        assert abs(v.max() - NORM_PEAK) < 1e-6
+    # measured DoG layers follow the exact curve, and peak on the layer whose mid-scale is r / sqrt(2)
+    for r, m, lay in zip(radii, MEASURED, PEAK_LAYER):
+        exact = np.array([disk_norm_log(r, s) for s in MID_SIGMA])
+        assert np.max(np.abs(m - exact)) < 0.025, (r, np.max(np.abs(m - exact)))
+        assert abs(MID_SIGMA[lay] / (r / math.sqrt(2)) - 1) < 1e-9, r
+    # doubling the radius moves the peak exactly 3 layers (k^3 = 2)
+    assert PEAK_LAYER[1] - PEAK_LAYER[0] == 3 and PEAK_LAYER[2] - PEAK_LAYER[1] == 3
+    assert 0 < PEAK_LAYER[0] and PEAK_LAYER[2] < N_LAYERS - 1
+    # SIFT's own detector finds exactly the three disk centers, at those layers (Scene 8 relies on this)
+    ext = find_extrema(DOG)
+    keep = sorted(e for e, t in zip(ext, classify_extrema(DOG, ext)) if t == "keep")
+    assert keep == sorted((lay,) + rc for lay, rc in zip(PEAK_LAYER, CENTER_PIX)), keep
+    # layout stays inside the frame
+    assert SHAPE[1] / PX < 13.4 and IMG_Y + SHAPE[0] / PX / 2 < 3.0
 
 
 # ------------------------------------------------------------------ helpers
@@ -44,25 +100,54 @@ def tex(*parts, fb=None):
     return VGroup(*[Text(p, font_size=30) for p in fb]).arrange(RIGHT, buff=0.12)
 
 
-def circle_response(sigma, radius):
-    """Rough Gaussian response used to highlight the fact that sigma peaks near r / sqrt(2)."""
-    sigma_peak = radius / math.sqrt(2.0)
-    width = 0.18 + 0.22 * radius
-    return math.exp(-0.5 * ((sigma - sigma_peak) / width) ** 2)
+def number_mob(fn, color, font_size=30, places=2):
+    if USE_LATEX:
+        m = DecimalNumber(fn(), num_decimal_places=places, font_size=font_size, color=color)
+        m.add_updater(lambda mob: mob.set_value(fn()))
+    else:
+        m = Text(f"{fn():.{places}f}", font_size=font_size - 6, color=color)
+        m.add_updater(lambda mob: mob.become(Text(f"{fn():.{places}f}", font_size=font_size - 6, color=color)))
+    return m
 
 
-def gaussian_blob(x, y, cx, cy, sigma):
-    return np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
+def gray_rgb(img):
+    v = np.clip(img, 0, 1)
+    return np.uint8(255 * np.stack([v, v, v], axis=-1))
 
 
-def self_check():
-    for radius in RADIUS_SET:
-        peak_sigma = radius / math.sqrt(2.0)
-        assert peak_sigma > 0.0, radius
-        assert abs(peak_sigma - radius / math.sqrt(2.0)) < 1e-12
-    assert np.all(np.diff(SIGMA_SET) > 0)
-    assert len(RADIUS_SET) == 3
-    assert len(CENTER_X) == 3
+def response_rgb(resp):
+    """Normalized response -> RGB: positive (cooling) in POS_COLOR, negative (warming surround) in NEG_COLOR."""
+    pos = np.clip(resp / NORM_PEAK, 0, 1)[..., None]
+    neg = np.clip(-resp / NORM_PEAK * NEG_GAIN, 0, 1)[..., None]
+    out = pos * np.array(color_to_rgb(POS_COLOR)) + neg * np.array(color_to_rgb(NEG_COLOR))
+    return np.uint8(255 * np.clip(out, 0, 1))
+
+
+def place_image(arr):
+    m = ImageMobject(arr)
+    m.stretch_to_fit_width(SHAPE[1] / PX)
+    m.stretch_to_fit_height(SHAPE[0] / PX)
+    m.move_to([0, IMG_Y, 0])
+    return m
+
+
+def on_screen(x, y):
+    return np.array([x, y + IMG_Y, 0.0])
+
+
+def lx(sigma):
+    """Plot x-coordinate of sigma: log10 sigma shifted so the y-axis sits at the left end."""
+    return math.log10(sigma) - LOGS_RANGE[0]
+
+
+LAYER_RGB = [response_rgb(RESP[i]).astype(float) for i in range(N_LAYERS)]
+
+
+def layer_image(ell):
+    """Display image at fractional layer index ell (linear blend of the two nearest layers)."""
+    i = min(int(math.floor(ell)), N_LAYERS - 2)
+    w = float(np.clip(ell - i, 0, 1))
+    return place_image(np.uint8((1 - w) * LAYER_RGB[i] + w * LAYER_RGB[i + 1]))
 
 
 # -------------------------------------------------------------------- scene
@@ -70,174 +155,172 @@ class TwoDCircles(Scene):
     def construct(self):
         self_check()
 
-        # BEAT 1 (0:00–0:12): "Back to two dimensions. Here is the real image patch we are looking at:
-        # a circular blob with a radius of its own. It is not a point and it is not blurred by one fixed amount."
-        xs = np.linspace(-4.0, 4.0, 300)
-        ys = np.linspace(-2.4, 2.4, 200)
-        X, Y = np.meshgrid(xs, ys)
-        base = gaussian_blob(X, Y, 0.0, 0.0, RADIUS_SET[1] / 2.0)
-        base = np.clip(base, 0.0, 1.0)
-        img = ImageMobject(np.uint8(255 * base))
-        img.scale(1.25)
-        img.move_to(ORIGIN)
-        self.play(FadeIn(img), run_time=RT["intro"])
+        def pad(t_end):
+            dt = t_end - self.time
+            assert dt > -0.05, f"beat overran its narration slot by {-dt:.2f} s"   # keeps voiceover timings fixed
+            if dt > 1e-3:
+                self.wait(dt)
 
-        focus_blob = Circle(
-            radius=RADIUS_SET[1] * 1.55,
-            color=PEAK_COLOR,
-            stroke_width=5,
-            fill_color=PEAK_COLOR,
-            fill_opacity=0.12,
-        )
-        focus_blob.move_to(img.get_center())
-        focus_blob.set_stroke(PEAK_COLOR, width=5)
-        self.play(Create(focus_blob), run_time=1.0)
-        self.play(Flash(focus_blob, line_length=0.6, num_lines=12, color=PEAK_COLOR), run_time=0.8)
+        radii = [d[2] for d in DISKS]
 
-        radius_marker = DashedLine(
-            img.get_left() + LEFT * 0.5,
-            img.get_right() + RIGHT * 0.5,
-            stroke_color=PEAK_COLOR,
-            stroke_width=2,
-            dash_length=0.09,
-        )
-        radius_label = tex("r", fb=["r"]).scale(0.8)
-        radius_label.next_to(focus_blob, UP, buff=0.25)
-        self.play(Create(radius_marker), FadeIn(radius_label), run_time=1.1)
-        self.play(Indicate(focus_blob, scale_factor=1.08), run_time=0.75)
+        # ================= BEAT 1 (0-10 s) =================
+        # "Back to two dimensions. Here's one object photographed from three distances:
+        # a bright disk of radius r, then 2r, then 4r."
+        t0 = self.time
+        photo = place_image(gray_rgb(IMAGE))
+        self.play(FadeIn(photo), run_time=RT["img_in"])
 
-        img_label = tex("2D image", fb=["2D image"]).scale(1.0)
-        img_label.next_to(img, UP, buff=0.75)
-        img_label.shift(UP * 0.25)
-        self.play(FadeIn(img_label), run_time=0.6)
-        self.wait(3.0)
+        radius_marks, radius_tags, z_tags = VGroup(), VGroup(), VGroup()
+        for (cx, cy, r, _), col, zt in zip(DISKS, DISK_COLORS, Z_TAGS):
+            c = on_screen(cx, cy)
+            seg = Line(c, c + RIGHT * r, color=col, stroke_width=4)
+            dot = Dot(c, radius=0.04, color=col)
+            n = int(round(r / R0))
+            lab = tex("r" if n == 1 else f"{n}r", fb=["r" if n == 1 else f"{n}r"]).scale(0.8).set_color(col)
+            lab.next_to(on_screen(cx, cy + r), UP, buff=0.15)
+            radius_marks.add(VGroup(seg, dot))
+            radius_tags.add(lab)
+            zl = tex(zt, fb=[zt]).scale(0.8).set_color(col)
+            zl.move_to(on_screen(cx, -SHAPE[0] / PX / 2 - 0.35))
+            z_tags.add(zl)
+        self.play(LaggedStart(*[AnimationGroup(Create(m), FadeIn(t)) for m, t in zip(radius_marks, radius_tags)],
+                              lag_ratio=0.35), run_time=RT["radii"])
+        self.play(FadeIn(z_tags), run_time=RT["tags"])
+        pad(t0 + BEAT_LEN["b1"])
 
-        # BEAT 2 (0:12–0:24): "Now we vary the Gaussian width. Too little blur, and the patch is still
-        # too sharp. Too much blur, and the feature is washed out. There is a sweet spot, and it is the
-        # size of the feature itself."
-        sigma_values = [0.35, 0.9, 1.6]
-        sigma_labels = VGroup(
-            tex(r"\sigma_{small}", fb=["small σ"]).scale(0.7),
-            tex(r"\sigma_{match}", fb=["match σ"]).scale(0.7),
-            tex(r"\sigma_{large}", fb=["large σ"]).scale(0.7),
-        )
-        blur_family = Group()
-        for sigma, label in zip(sigma_values, sigma_labels):
-            patch = ImageMobject(np.uint8(255 * np.clip(gaussian_blob(X, Y, 0.0, 0.0, sigma), 0.0, 1.0)))
-            patch.scale(0.45)
-            blur_family.add(patch)
-            label.next_to(patch, DOWN, buff=0.35)
+        # ================= BEAT 2 (10-26 s) =================
+        # "Blur, subtract the next blur level, and we get one Difference-of-Gaussians layer: how much
+        # each point cooled in between. Step sigma up, and watch: the small disk lights up first,
+        # then the middle one, then the big one."
+        # cues (beat time): equation 0-1.2, DoG layer 2.7-3.9, readout 7.4, sweep 9.8-15.4 with
+        # flashes at about 10.5, 12.6, 14.7 ("small ... middle ... big")
+        t0 = self.time
+        eq = tex(r"D_\sigma", "=", r"G_{k\sigma} * I", "-", r"G_{\sigma} * I",
+                 fb=["D_σ", "=", "G_kσ * I", "−", "G_σ * I"]).move_to([-1.3, 3.25, 0])
+        self.play(Write(eq), FadeOut(radius_marks), FadeOut(radius_tags), run_time=RT["eq"])
 
-        blur_family.arrange(RIGHT, buff=0.7)
-        blur_family.move_to(ORIGIN)
-        sigma_labels.arrange(RIGHT, buff=1.6)
-        sigma_labels.move_to(blur_family.get_bottom() + DOWN * 0.55)
+        ell = ValueTracker(0.0)
+        first = layer_image(0.0)
+        self.wait(RT["pre_dog"])
+        self.play(FadeTransform(photo, first), run_time=RT["to_dog"])
+        self.wait(RT["pre_readout"])                   # "how much each point cooled in between"
+        self.remove(first)
+        live = always_redraw(lambda: layer_image(ell.get_value()))
+        self.add(live)
 
-        self.play(
-            FadeOut(img, run_time=1.0),
-            FadeOut(img_label, run_time=1.0),
-            FadeOut(focus_blob, run_time=1.0),
-            FadeOut(radius_marker, run_time=1.0),
-            FadeOut(radius_label, run_time=1.0),
-        )
-        self.play(FadeIn(blur_family), run_time=1.5)
-        self.play(FadeIn(sigma_labels), run_time=1.0)
-        self.play(Indicate(blur_family[1], scale_factor=1.12), run_time=1.2)
-        self.wait(3.5)
+        lay_lab = Text("layer", font_size=24).move_to([4.9, 3.45, 0], aligned_edge=RIGHT)
+        sig_lab = tex(r"\sigma =", fb=["σ ="]).scale(0.8).move_to([4.9, 2.95, 0], aligned_edge=RIGHT)
+        lay_num = number_mob(lambda: math.floor(ell.get_value() + 1e-6) + 1, WHITE, 30, 0)
+        sig_num = number_mob(lambda: MID_SIGMA[0] * SIFT_K ** ell.get_value(), WHITE, 30, 2)
+        lay_num.add_updater(lambda m: m.move_to([5.05, 3.45, 0], aligned_edge=LEFT))
+        sig_num.add_updater(lambda m: m.move_to([5.05, 2.95, 0], aligned_edge=LEFT))
+        lay_num.update()
+        sig_num.update()
+        readout = VGroup(lay_lab, sig_lab, lay_num, sig_num)
+        self.play(FadeIn(readout), run_time=RT["readout"])
+        self.wait(RT["pre_sweep"])                     # "Step sigma up, and watch:"
 
-        # BEAT 3 (0:24–0:36): "This gives us the response curve. At each blur width, the feature responds
-        # differently. The signal peaks when the Gaussian width matches the blob radius, and the peak is
-        # near sigma = r / sqrt(2)."
-        self.play(FadeOut(blur_family, run_time=1.2), FadeOut(sigma_labels, run_time=1.2))
+        # one continuous linear sweep over the layers, split where each disk peaks so it can flash
+        end = N_LAYERS - 1
+        self.play(ell.animate.set_value(PEAK_LAYER[0]), run_time=RT["sweep"] * PEAK_LAYER[0] / end,
+                  rate_func=linear)
+        for k_, (lay, (cx, cy, r, _), col) in enumerate(zip(PEAK_LAYER, DISKS, DISK_COLORS)):
+            nxt = PEAK_LAYER[k_ + 1] if k_ + 1 < len(PEAK_LAYER) else end
+            ring = Circle(radius=r, color=col, stroke_width=4).move_to(on_screen(cx, cy))
+            # no play-level run_time: the flashes keep their own short durations inside the sweep segment
+            self.play(ell.animate(rate_func=linear, run_time=RT["sweep"] * (nxt - lay) / end).set_value(nxt),
+                      Flash(on_screen(cx, cy), color=col, flash_radius=r + 0.15, line_length=0.25,
+                            run_time=RT["flash"]),
+                      ShowPassingFlash(ring, time_width=0.9, run_time=RT["flash"] * 1.5))
+        pad(t0 + BEAT_LEN["b2"])
+
+        # ================= BEAT 3 (26-38 s) =================
+        # "Track each disk's center across the layers. Each peaks in its own layer, at sigma equals
+        # r over root two, and all three peaks reach the same height."
+        t0 = self.time
+        self.play(FadeOut(live), FadeOut(readout), FadeOut(z_tags), FadeOut(eq), run_time=RT["out"])
 
         ax = Axes(
-            x_range=[0.0, 2.1, 0.5],
-            y_range=[0.0, 1.2, 0.5],
-            x_length=6.0,
-            y_length=3.0,
-            tips=False,
-            axis_config={"include_ticks": False, "include_numbers": False, "stroke_width": 3},
-        ).move_to([0.0, -0.2, 0.0])
-        self.play(Create(ax), run_time=1.0)
+            x_range=[0, LOGS_RANGE[1] - LOGS_RANGE[0], 0.25], y_range=[0, NORM_PEAK * 1.3, 0.25],
+            x_length=PLOT_X_LEN, y_length=PLOT_Y_LEN, tips=False,
+            axis_config={"include_ticks": False, "include_numbers": False, "stroke_width": 3, "color": AXIS_COLOR},
+        ).move_to([PLOT_CENTER[0], PLOT_CENTER[1], 0])
+        x_lab = tex(r"\sigma", fb=["σ"]).scale(0.7).next_to(ax.x_axis.get_end(), RIGHT, buff=0.15)
+        y_lab = tex(r"\sigma^2 \cdot \text{cooling rate}", fb=["σ² · cooling rate"]).scale(0.7)
+        y_lab.next_to(ax.y_axis.get_end(), UP, buff=0.15).align_to(ax.y_axis, LEFT)
+        ticks = VGroup()
+        for s in SIGMA_TICKS:
+            p = ax.c2p(lx(s), 0)
+            t_lab = Text(f"{s:g}", font_size=20, color=GRAY_B).next_to(p, DOWN, buff=0.15)
+            ticks.add(VGroup(Line(p + UP * 0.06, p + DOWN * 0.06, color=AXIS_COLOR, stroke_width=2), t_lab))
+        self.play(Create(ax), FadeIn(x_lab), FadeIn(y_lab), FadeIn(ticks), run_time=RT["axes"])
 
-        response_graphs = VGroup()
-        for radius, color in zip(RADIUS_SET, CIRCLE_COLORS):
-            xs_curve = np.linspace(0.05, 2.0, 220)
-            ys_curve = np.array([circle_response(s, radius) for s in xs_curve])
-            curve = VMobject(color=color, stroke_width=3)
-            curve.set_points_as_corners([ax.c2p(x, y) for x, y in zip(xs_curve, ys_curve)])
-            response_graphs.add(curve)
+        ls = np.linspace(LOGS_RANGE[0], LOGS_RANGE[1], 300)
+        curves = VGroup()
+        for r, col in zip(radii, DISK_COLORS):
+            pts = [ax.c2p(l - LOGS_RANGE[0], disk_norm_log(r, 10 ** l)) for l in ls]
+            curves.add(VMobject(color=col, stroke_width=5).set_points_as_corners(pts))
+        self.play(LaggedStart(*[Create(c) for c in curves], lag_ratio=0.25), run_time=RT["curves"])
 
-        selected_idx = 1
-        selected_radius = RADIUS_SET[selected_idx]
-        selected_sigma = selected_radius / math.sqrt(2.0)
-        selected_curve = response_graphs[selected_idx]
-        selected_curve.set_stroke(color=PEAK_COLOR, width=5)
-        muted_graphs = VGroup(*[curve for i, curve in enumerate(response_graphs) if i != selected_idx])
-        for curve in muted_graphs:
-            curve.set_stroke(opacity=0.35)
+        dots = VGroup()
+        for m, col in zip(MEASURED, DISK_COLORS):
+            dots.add(VGroup(*[Dot(ax.c2p(lx(s), v), radius=0.05, color=col)
+                              for s, v in zip(MID_SIGMA, m) if LOGS_RANGE[0] <= math.log10(s) <= LOGS_RANGE[1]]))
+        dots_tag = Text("DoG layers", font_size=22, color=GRAY_B).move_to(ax.c2p(lx(1.0), NORM_PEAK * 1.22))
+        self.play(LaggedStart(*[FadeIn(d, lag_ratio=0.1) for d in dots], lag_ratio=0.2), FadeIn(dots_tag),
+                  run_time=RT["dots"])
 
-        self.play(LaggedStart(*[FadeIn(curve, run_time=0.8) for curve in response_graphs], lag_ratio=0.2), run_time=2.6)
-        self.play(Indicate(selected_curve, scale_factor=1.04), run_time=0.9)
+        peak_marks, peak_dots, peak_vals = VGroup(), VGroup(), VGroup()
+        for r, col in zip(radii, DISK_COLORS):
+            s_star = r / math.sqrt(2)
+            top = ax.c2p(lx(s_star), disk_norm_log(r, s_star))
+            peak_marks.add(DashedLine(ax.c2p(lx(s_star), 0), top, dash_length=0.08, stroke_width=2,
+                                      color=col, stroke_opacity=0.8))
+            peak_dots.add(Dot(top, radius=0.07, color=col))
+            peak_vals.add(Text(f"{s_star:.2f}", font_size=22, color=col).next_to(top, UP, buff=0.12))
+        rule = tex(r"\sigma^* = \frac{r}{\sqrt{2}}", fb=["σ* = r / √2"]).move_to([-1.3, 3.25, 0])
+        self.play(Create(peak_marks), FadeIn(peak_dots), FadeIn(peak_vals), Write(rule), run_time=RT["peaks"])
+        level = DashedLine(ax.c2p(0, NORM_PEAK), ax.c2p(LOGS_RANGE[1] - LOGS_RANGE[0], NORM_PEAK), dash_length=0.1,
+                           stroke_width=2, color=WHITE, stroke_opacity=0.55)
+        self.play(Create(level), run_time=RT["level"])
+        pad(t0 + BEAT_LEN["b3"])
 
-        peak_height = circle_response(selected_sigma, selected_radius)
-        sigma_line = Line(
-            ax.c2p(selected_sigma, 0),
-            ax.c2p(selected_sigma, peak_height),
-            color=PEAK_COLOR,
-            stroke_width=2,
-        )
-        sigma_line.set_stroke(PEAK_COLOR, width=2, opacity=0.8)
-        peak_dot = Dot(ax.c2p(selected_sigma, peak_height), color=PEAK_COLOR)
-        self.play(Create(sigma_line), FadeIn(peak_dot), run_time=1.2)
+        # ================= BEAT 4 (38-47 s) =================
+        # "Photograph the same object from three distances, and its blob peaks three layers apart.
+        # Different sigma, same feature."
+        t0 = self.time
+        self.wait(RT["pre_arrows"])                    # arrows land on "three layers apart"
+        hops = VGroup()
+        for a, b in ((0, 1), (1, 2)):
+            pa, pb = peak_dots[a].get_center(), peak_dots[b].get_center()
+            arc = CurvedArrow(pa + UP * 0.45, pb + UP * 0.45, angle=-PI / 3, color=WHITE, stroke_width=3,
+                              tip_length=0.15)
+            n = PEAK_LAYER[b] - PEAK_LAYER[a]
+            lab = Text(f"+{n} layers", font_size=22).next_to(arc, UP, buff=0.08)
+            hops.add(VGroup(arc, lab))
+        self.play(FadeOut(peak_vals), FadeOut(dots_tag),
+                  LaggedStart(*[Create(h[0]) for h in hops], lag_ratio=0.4),
+                  LaggedStart(*[FadeIn(h[1]) for h in hops], lag_ratio=0.4), run_time=RT["arrows"])
+        self.wait(1.4)
 
-        sigma_label = tex(r"\sigma", fb=["σ"]).scale(0.7)
-        sigma_label.next_to(ax.c2p(selected_sigma, 0.0), DOWN, buff=0.26)
-        self.play(FadeIn(sigma_label), run_time=0.8)
+        plot = VGroup(ax, x_lab, y_lab, ticks, curves, dots, peak_marks, peak_dots, level, hops, rule)
+        photo2 = place_image(gray_rgb(IMAGE))
+        self.play(FadeOut(plot), FadeIn(photo2), FadeIn(z_tags), run_time=RT["back"])
 
-        label_peak = tex(r"\sigma \approx r/\sqrt{2}", fb=["σ ≈ r / √2"]).scale(0.78)
-        label_peak.move_to([0.5, 2.1, 0.0])
-        self.play(FadeIn(label_peak), run_time=0.8)
-        self.wait(3.0)
+        found = VGroup()
+        for lay, (r_, c_), col in zip(PEAK_LAYER, CENTER_PIX, DISK_COLORS):
+            x, y = to_scene(r_, c_, SHAPE, PX)
+            rad = math.sqrt(2) * MID_SIGMA[lay]          # detected scale -> radius: r = sqrt(2) sigma*
+            found.add(Circle(radius=rad, color=col, stroke_width=4).move_to(on_screen(x, y)))
+        self.play(photo2.animate.set_opacity(GHOST_OPACITY),
+                  LaggedStart(*[Create(c) for c in found], lag_ratio=0.3), run_time=RT["circles"])
+        key = tex(r"(x,\, y,\, \sigma)", fb=["(x, y, σ)"]).move_to([-1.3, 3.25, 0])
+        self.play(Write(key), run_time=RT["key"])
+        pad(t0 + BEAT_LEN["b4"])
 
-        # BEAT 4 (0:36–0:45): "This is the key point: the best scale is not fixed globally. Small blobs
-        # prefer small σ, large blobs prefer larger σ. In SIFT we search over position and scale, and keep
-        # extrema in (x, y, σ)."
-        peak_labels = VGroup(
-            tex(r"\sigma_1", fb=["σ₁"]).scale(0.8),
-            tex(r"\sigma_2", fb=["σ₂"]).scale(0.8),
-            tex(r"\sigma_3", fb=["σ₃"]).scale(0.8),
-        )
-        for label, radius, color in zip(peak_labels, RADIUS_SET, CIRCLE_COLORS):
-            x = radius / math.sqrt(2.0)
-            label.set_color(color)
-            label.next_to(ax.c2p(x, 0.0), DOWN, buff=0.28)
-            label.shift(UP * 0.15)
 
-        size_demo = VGroup()
-        for radius, color in zip(RADIUS_SET, CIRCLE_COLORS):
-            ring = Circle(radius=radius, color=color, stroke_width=3, fill_opacity=0.0)
-            ring.move_to(ax.c2p(radius / math.sqrt(2.0), 0.2))
-            size_demo.add(ring)
-
-        keypoint_label = tex(r"(x, y, \sigma)", fb=["(x, y, σ)"]).scale(0.8)
-        keypoint_label.next_to(ax.get_corner(UL), UP, buff=0.4)
-        self.play(FadeIn(peak_labels), run_time=1.0)
-        self.play(LaggedStart(*[Create(ring) for ring in size_demo], lag_ratio=0.25), run_time=2.2)
-        self.play(FadeIn(keypoint_label), run_time=0.8)
-        self.wait(2.3)
-
-        self.play(
-            FadeOut(sigma_label),
-            FadeOut(label_peak),
-            FadeOut(peak_dot),
-            FadeOut(sigma_line),
-            FadeOut(peak_labels),
-            FadeOut(size_demo),
-            FadeOut(keypoint_label),
-            FadeOut(ax),
-            FadeOut(selected_curve),
-            *[FadeOut(curve) for curve in muted_graphs],
-            run_time=1.2,
-        )
-        self.wait(0.5)
+# ---------------------------------------------------------------------------
+# Docs consulted (manim==0.21.0; https://docs.manim.community/en/stable/)
+#  - ImageMobject (numpy array input, stretch_to_fit_*):
+#      https://docs.manim.community/en/stable/reference/manim.mobject.types.image_mobject.ImageMobject.html
+#  - FadeTransform, ShowPassingFlash, Flash, CurvedArrow, always_redraw, ValueTracker
