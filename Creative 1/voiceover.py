@@ -17,6 +17,7 @@ import argparse
 import glob
 import importlib
 import os
+import re
 import sys
 
 import av
@@ -78,9 +79,16 @@ def trim(x):
     return x[a:b]
 
 
+AUDIO_EXT = (".wav", ".m4a", ".mp3", ".flac", ".ogg")
+
+
 def find_clip(scene, beat, clip_dir=CLIP_DIR):
-    hits = sorted(glob.glob(os.path.join(clip_dir, f"scene{scene}_beat{beat}.*")))
-    return hits[0] if hits else None
+    """The clip for scene/beat: 'scene7_beat2.wav', 'scene 7 beat 2.wav', 'Scene7-Part2.m4a' all match.
+    If several match, the most recently modified wins."""
+    pat = re.compile(rf"^scene[\s_-]*{scene}[\s_-]*(beat|part)[\s_-]*{beat}$", re.IGNORECASE)
+    hits = [p for p in glob.glob(os.path.join(clip_dir, "*"))
+            if os.path.splitext(p)[1].lower() in AUDIO_EXT and pat.match(os.path.splitext(os.path.basename(p))[0])]
+    return max(hits, key=os.path.getmtime) if hits else None
 
 
 def build_track(scene, target_rms, clip_dir=CLIP_DIR):

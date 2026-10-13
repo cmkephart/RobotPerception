@@ -2,3 +2,6 @@
 media/
 __pycache__/
 .DS_Store
+*.aup4
+*.aup4-shm
+*.aup4-wal

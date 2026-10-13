@@ -1,6 +1,6 @@
 # Voiceover recording sheet: scenes 7–9
 
-Record one clip per beat (8 clips) and save each one in this folder under the file name given in its heading. WAV, M4A (phone voice memos) and MP3 all work. Then, from `Creative 1/`:
+Record one clip per beat (8 clips) and save each one in this folder under the file name given in its heading. Spaces or "part" also work (`scene 7 beat 2.wav`, `Scene7-Part2.m4a`); if two files match the same beat, the newest one is used. WAV, M4A (phone voice memos) and MP3 all work. Then, from `Creative 1/`:
 
 ```powershell
 .\.venv\Scripts\python.exe voiceover.py
