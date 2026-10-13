@@ -46,7 +46,7 @@ Do not rely on the shell-activated `manim` alias on Windows because PowerShell e
 
 ## Next recommended task
 
-- Record the voiceover against the README timecodes and cut it onto the renders.
+- Voiceover (in progress, on branch `scenes-7-9`): the owner records 8 clips in Audacity, one per beat, following `Creative 1/voiceover/README.md`, and saves them as `Creative 1/voiceover/scene{N}_beat{B}.wav`. Then run `.\.venv\Scripts\python.exe voiceover.py` from `Creative 1/`. It reports each clip's length against its slot and writes `media/videos/<scene>/1080p60/<Scene>_vo.mp4`. The `_vo.mp4` files there now hold a robot-voice placeholder for checking timing. Check the first real clip's level and quality before the rest are recorded.
 
 ## References to consult
 
