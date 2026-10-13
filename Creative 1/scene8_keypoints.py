@@ -49,10 +49,24 @@ CANDIDATE_FLOOR = 0.01                      # draw candidates with |D| above thi
 
 BEAT_LEN = dict(b1=18, b2=13)               # seconds, total 31
 RT = dict(
-    layers_in=1.0, spread=2.6, axes=1.0, marker=1.0, indicate=1.0, to_block=1.6,
-    hold_block=2.0, same=1.0, gap_count=0.5, above=1.0, below=1.0, compare=0.9,
-    flat=1.4, dots=0.6, circles=1.0, clutter=1.2, weak=1.1, pre_edge=1.4, edge=1.1, final=0.6,
+    layers_in=1.0, spread=2.6, axes=1.0, marker=0.8, indicate=1.0, to_block=1.6,
+    same=1.0, above=1.0, below=1.0, compare=0.9,
+    flat=1.4, dots=0.6, circles=1.0, clutter=1.2, weak=1.1, edge=1.1, final=0.6,
 )
+# Cue start times (seconds into the beat), measured from the recorded narration
+# (voiceover/scene 8 beat {1,2}.wav, placed by voiceover.py 0.25 s into each beat).
+CUE1 = dict(keypoint=6.5,    # "A keypoint is a sample..."
+            block=9.4,       # "...than all 26 of its neighbors:"
+            same=11.7,       # "8 around it in its own layer,"
+            above=13.7,      # "9 in the layer above,"
+            below=15.1,      # "9 below."
+            compare=16.2)
+CUE2 = dict(dots=1.4,        # "Position says where the feature is;"
+            circles=3.2,     # "scale says how big."
+            clutter=4.9,     # "Then SIFT cleans up:"
+            weak=6.9,        # "it drops weak responses, which are mostly noise,"
+            edge=9.4,        # "and points on edges, which can slide along the edge."
+            final=11.4)
 
 USE_LATEX = os.environ.get("NO_LATEX") != "1"
 
@@ -160,6 +174,10 @@ class Keypoints(ThreeDScene):
             if dt > 1e-3:
                 self.wait(dt)
 
+        def at(t_cue):
+            """Wait until t_cue seconds into the current beat (raises if the previous step ran past it)."""
+            pad(t0 + t_cue)
+
         def fixed(*mobs):
             self.add_fixed_in_frame_mobjects(*mobs)
             self.remove(*mobs)              # added for real by the animation that introduces them
@@ -172,8 +190,7 @@ class Keypoints(ThreeDScene):
         # "Stack the layers into one volume: two axes for position, a third for scale. A keypoint is a
         # sample brighter, or darker, than all 26 of its neighbors: 8 around it in its own layer,
         # 9 in the layer above, 9 below."
-        # cues (beat time): stack 0-3.6, axes 3.6-4.6, keypoint 4.6-6.6, block 6.6-8.2,
-        # 8 / 9 / 9 at 10.2 / 11.7 / 13.2, comparison 14.2
+        # cues: stack 0-3.6, axes 3.6-4.6, then CUE1 (timed to the recording)
         t0 = self.time
         layers, frames = Group(), VGroup()
         for i in range(N_LAYERS):
@@ -203,6 +220,7 @@ class Keypoints(ThreeDScene):
         key = KEYS[FOCUS]
         col = DISK_COLORS[FOCUS]
         marker = Cube(side_length=0.16, fill_color=col, fill_opacity=1.0, stroke_width=0).move_to(stack_point(key[1], key[2], key[0]))
+        at(CUE1["keypoint"])
         self.play(FadeIn(marker, scale=3), run_time=RT["marker"])
         self.play(Indicate(marker, scale_factor=1.8, color=col), run_time=RT["indicate"])
 
@@ -229,11 +247,11 @@ class Keypoints(ThreeDScene):
         center = cubes[(0, 0, 0)]
         others = VGroup(*[c for k_, c in cubes.items() if k_ != (0, 0, 0)])
         stack_all = Group(layers, frames, ax_x, ax_y, ax_s, lab_x, lab_y, lab_s)
+        at(CUE1["block"])
         self.move_camera(**CAM_BLOCK, run_time=RT["to_block"],
                          added_anims=[FadeOut(stack_all), ReplacementTransform(marker, center),
                                       FadeIn(others)])
         self.begin_ambient_camera_rotation(rate=ROTATE_RATE)
-        self.wait(RT["hold_block"])                    # "...than all 26 neighbors:"
 
         same = VGroup(*[c for (dl, dr, dc), c in cubes.items() if dl == 0 and (dr, dc) != (0, 0)])
         above = VGroup(*[c for (dl, _, _), c in cubes.items() if dl == 1])
@@ -254,10 +272,11 @@ class Keypoints(ThreeDScene):
         def light(group, color):
             return [c.animate.set_fill(color, opacity=HIGHLIGHT_OPACITY) for c in group]
 
+        at(CUE1["same"])
         self.play(*light(same, SAME_COLOR), FadeIn(count[0]), run_time=RT["same"])
-        self.wait(RT["gap_count"])
+        at(CUE1["above"])
         self.play(*light(above, OTHER_COLOR), FadeIn(count[1]), run_time=RT["above"])
-        self.wait(RT["gap_count"])
+        at(CUE1["below"])
         self.play(*light(below, OTHER_COLOR), FadeIn(count[2]), Create(rule), FadeIn(count[3]),
                   run_time=RT["below"])
 
@@ -268,13 +287,14 @@ class Keypoints(ThreeDScene):
             Text(f"best of 26   {best:.{p}f}", font_size=24),
         ).arrange(DOWN, aligned_edge=RIGHT, buff=0.2).to_corner(UR, buff=0.6)
         fixed(cmp_)
+        at(CUE1["compare"])
         self.play(FadeIn(cmp_), run_time=RT["compare"])
         pad(t0 + BEAT_LEN["b1"])
 
         # ================= BEAT 2 (18-31 s) =================
         # "Position says where the feature is; scale says how big. Then SIFT cleans up: it drops weak
         # responses, which are mostly noise, and points on edges, which can slide along the edge."
-        # cues (beat time): dots 1.4, circles 2.0-3.0, clutter 3.8-5.0, weak 5.4-6.5, edge 7.9-9.0
+        # cues: CUE2 (timed to the recording)
         t0 = self.time
         photo = flat_image(gray_rgb(IMAGE)).set_opacity(0.6)
         self.play(FadeOut(block), FadeOut(count), FadeOut(rule), FadeOut(cmp_), run_time=RT["flat"] / 2)
@@ -283,11 +303,12 @@ class Keypoints(ThreeDScene):
         self.play(FadeIn(photo), run_time=RT["flat"] / 2)
 
         dots = VGroup(*[Dot(flat_point(r, c), radius=0.06, color=cl) for (_, r, c), cl in zip(KEYS, DISK_COLORS)])
+        at(CUE2["dots"])
         self.play(FadeIn(dots), run_time=RT["dots"])
         rings = VGroup(*[Circle(radius=math.sqrt(2) * MID_SIGMA[l], color=cl, stroke_width=4).move_to(flat_point(r, c))
                          for (l, r, c), cl in zip(KEYS, DISK_COLORS)])
+        at(CUE2["circles"])
         self.play(*[GrowFromCenter(g) for g in rings], run_time=RT["circles"])
-        self.wait(0.8)
 
         # clutter arrives: every extremum becomes a candidate circle
         photo2 = flat_image(gray_rgb(CLUT)).set_opacity(0.6)
@@ -297,20 +318,22 @@ class Keypoints(ThreeDScene):
                 continue
             cand[t].add(Circle(radius=math.sqrt(2) * MID_SIGMA[l], color=WHITE, stroke_width=2.5)
                         .move_to(flat_point(r, c)))
+        at(CUE2["clutter"])
         self.play(FadeTransform(photo, photo2), FadeIn(cand["weak"]), FadeIn(cand["edge"]), run_time=RT["clutter"])
-        self.wait(0.4)
 
         def tag_for(group, word):
             far = max(group, key=lambda m: m.get_center()[1] if word == "edge" else -m.get_center()[1])
             return Text(word, font_size=22, color=GRAY_B).next_to(far, UP if word == "edge" else DOWN, buff=0.12)
 
         weak_tag = tag_for(cand["weak"], "weak")
+        at(CUE2["weak"])
         self.play(cand["weak"].animate.set_stroke(GRAY, opacity=GHOST_OPACITY), FadeIn(weak_tag), run_time=RT["weak"] / 2)
         self.play(FadeOut(cand["weak"]), FadeOut(weak_tag), run_time=RT["weak"] / 2)
-        self.wait(RT["pre_edge"])                      # "...and points on edges"
+        at(CUE2["edge"])
         edge_tag = tag_for(cand["edge"], "edge")
         self.play(cand["edge"].animate.set_stroke(GRAY, opacity=GHOST_OPACITY), FadeIn(edge_tag), run_time=RT["edge"] / 2)
         self.play(FadeOut(cand["edge"]), FadeOut(edge_tag), run_time=RT["edge"] / 2)
+        at(CUE2["final"])
         self.play(*[Indicate(g, scale_factor=1.08, color=cl) for g, cl in zip(rings, DISK_COLORS)],
                   run_time=RT["final"])
         pad(t0 + BEAT_LEN["b2"])
